@@ -11,6 +11,7 @@ app.py
 import time
 import matplotlib
 matplotlib.use("Agg")  # Streamlit では非インタラクティブバックエンドを使用
+import japanize_matplotlib
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
