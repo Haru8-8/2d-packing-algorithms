@@ -2,12 +2,15 @@
 
 2次元矩形パッキング問題に対する複数アルゴリズムの実装・比較ポートフォリオ。
 
+![Python](https://img.shields.io/badge/Python-3.12+-blue?logo=python)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-red?logo=streamlit)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://2d-packing-algorithms-r3lvpgajmvk2earrnhl3dk.streamlit.app/)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
 ## デモ
 
 Streamlit Cloud でインタラクティブデモを公開しています。  
-→ **[デモURL]** *(Streamlit Cloud にデプロイ後に記入)*
-
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/)
+→ **https://2d-packing-algorithms-r3lvpgajmvk2earrnhl3dk.streamlit.app/**
 
 ## 実装手法
 
@@ -55,6 +58,10 @@ streamlit run app.py
 ### BL法 vs 焼きなまし法（充填率比較）
 
 10問の平均: BL法 **86.1%** → 焼きなまし法 **94.9%**（平均 **+8.8%** 改善）
+
+## ライセンス
+
+[MIT License](LICENSE)
 
 ## 参考文献
 
