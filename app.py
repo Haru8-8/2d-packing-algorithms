@@ -151,6 +151,10 @@ def plot_bar_comparison(labels, fills, times):
     plt.tight_layout()
     return fig
 
+# デバッグ用：一時的に追加（確認後削除）
+from matplotlib import font_manager
+noto_fonts = [f.name for f in font_manager.fontManager.ttflist if 'Noto' in f.name]
+st.write("認識されたNotoフォント:", noto_fonts)
 
 # ---------------------------------------------------------------------------
 # サイドバー：パラメータ設定
