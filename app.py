@@ -16,17 +16,33 @@ matplotlib.use("Agg")  # Streamlit では非インタラクティブバックエ
 # 日本語設定
 # ---------------------------------------------------------------------------
 
-# Linux環境での日本語フォント設定
-from matplotlib import font_manager
-import matplotlib as mpl
-
 def _setup_japanese_font():
+    import subprocess
+    from matplotlib import font_manager
+    import matplotlib as mpl
+
+    # フォントキャッシュをクリアして再スキャン
+    font_manager._load_fontmanager(try_read_cache=False)
+
     for font in font_manager.fontManager.ttflist:
         if 'Noto' in font.name and 'CJK' in font.name:
             mpl.rcParams['font.family'] = font.name
             return
-    # フォールバック
-    mpl.rcParams['font.family'] = 'sans-serif'
+
+    # Noto CJK が見つからない場合はファイルパスで直接探す
+    import glob
+    patterns = [
+        '/usr/share/fonts/**/Noto*CJK*.ttc',
+        '/usr/share/fonts/**/Noto*CJK*.otf',
+        '/usr/share/fonts/**/*noto*cjk*.ttc',
+    ]
+    for pattern in patterns:
+        files = glob.glob(pattern, recursive=True)
+        if files:
+            font_manager.fontManager.addfont(files[0])
+            prop = font_manager.FontProperties(fname=files[0])
+            mpl.rcParams['font.family'] = prop.get_name()
+            return
 
 _setup_japanese_font()
 
@@ -151,10 +167,15 @@ def plot_bar_comparison(labels, fills, times):
     plt.tight_layout()
     return fig
 
-# デバッグ用：一時的に追加（確認後削除）
+# デバッグ用
+import glob
+found_files = glob.glob('/usr/share/fonts/**/Noto*', recursive=True)
+st.write("Notoフォントファイル:", found_files[:5])
+
 from matplotlib import font_manager
 noto_fonts = [f.name for f in font_manager.fontManager.ttflist if 'Noto' in f.name]
 st.write("認識されたNotoフォント:", noto_fonts)
+st.write("現在のfont.family設定:", matplotlib.rcParams['font.family'])
 
 # ---------------------------------------------------------------------------
 # サイドバー：パラメータ設定
