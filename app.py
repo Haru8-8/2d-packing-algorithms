@@ -167,16 +167,6 @@ def plot_bar_comparison(labels, fills, times):
     plt.tight_layout()
     return fig
 
-# デバッグ用
-import glob
-found_files = glob.glob('/usr/share/fonts/**/Noto*', recursive=True)
-st.write("Notoフォントファイル:", found_files[:5])
-
-from matplotlib import font_manager
-noto_fonts = [f.name for f in font_manager.fontManager.ttflist if 'Noto' in f.name]
-st.write("認識されたNotoフォント:", noto_fonts)
-st.write("現在のfont.family設定:", matplotlib.rcParams['font.family'])
-
 # ---------------------------------------------------------------------------
 # サイドバー：パラメータ設定
 # ---------------------------------------------------------------------------
