@@ -11,7 +11,24 @@ app.py
 import time
 import matplotlib
 matplotlib.use("Agg")  # Streamlit では非インタラクティブバックエンドを使用
-import japanize_matplotlib
+
+# ---------------------------------------------------------------------------
+# 日本語設定
+# ---------------------------------------------------------------------------
+
+# Linux環境での日本語フォント設定
+from matplotlib import font_manager
+import matplotlib as mpl
+
+def _setup_japanese_font():
+    for font in font_manager.fontManager.ttflist:
+        if 'Noto' in font.name and 'CJK' in font.name:
+            mpl.rcParams['font.family'] = font.name
+            return
+    # フォールバック
+    mpl.rcParams['font.family'] = 'sans-serif'
+
+_setup_japanese_font()
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
