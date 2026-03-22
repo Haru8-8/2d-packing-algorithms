@@ -74,6 +74,7 @@ Streamlit Cloud でインタラクティブデモを公開しています。
 ## 関連記事
 
 - [2次元パッキング問題におけるBottom-Left法とNFPを用いた高速化の実装](https://qiita.com/Haru8-8/items/438f87b89f065f29a6f4)
+- [焼きなまし法による2次元パッキング問題の充填率改善](https://qiita.com/Haru8-8/items/cf04753edaa9f1ebec9e)
 
 ---
 
