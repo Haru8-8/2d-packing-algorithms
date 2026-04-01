@@ -150,3 +150,90 @@ def plot_comparison(
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_polygon_packing(
+    polygons:  list,
+    positions: list[tuple[float, float]],
+    bin_w:     float,
+    bin_h:     float | None = None,
+    title:     str = "2D Polygon Packing",
+    ax=None,
+    show:      bool = True,
+):
+    """
+    多角形のパッキング結果を描画する。
+
+    Parameters
+    ----------
+    polygons  : Shapely Polygon のリスト（回転済み・原点正規化済み）
+    positions : 各図形の参照点座標のリスト
+    bin_w     : ビンの幅
+    bin_h     : ビンの高さ（None の場合は自動）
+    title     : グラフタイトル
+    ax        : 既存の Axes に描画する場合は渡す
+    show      : True なら plt.show() を呼ぶ
+    """
+    from matplotlib.path import Path
+    from matplotlib.patches import PathPatch
+    from matplotlib.collections import PatchCollection
+    from shapely import affinity
+    import numpy as np
+
+    if bin_h is None:
+        used_h = max(
+            pos[1] + poly.bounds[3]
+            for poly, pos in zip(polygons, positions)
+        )
+        bin_h = used_h * 1.05
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6 * bin_h / bin_w))
+
+    # ビン外枠
+    bin_rect = patches.Rectangle(
+        (0, 0), bin_w, bin_h,
+        linewidth=2, edgecolor='black', facecolor='whitesmoke'
+    )
+    ax.add_patch(bin_rect)
+
+    colors = cm.tab20(np.linspace(0, 1, max(len(polygons), 1)))
+
+    for i, (poly, pos) in enumerate(zip(polygons, positions)):
+        translated = affinity.translate(poly, xoff=pos[0], yoff=pos[1])
+
+        coords = np.array(translated.exterior.coords)
+        path = Path(coords)
+        patch = PathPatch(
+            path,
+            facecolor=colors[i % len(colors)],
+            edgecolor='white',
+            alpha=0.85,
+            linewidth=1,
+        )
+        ax.add_patch(patch)
+
+        # ラベル（重心に表示）
+        cx, cy = translated.centroid.x, translated.centroid.y
+        ax.text(
+            cx, cy, str(i),
+            ha='center', va='center',
+            fontsize=9, color='white', fontweight='bold',
+        )
+
+    total_area = sum(p.area for p in polygons)
+    bin_area   = bin_w * bin_h
+    fill_rate  = total_area / bin_area * 100
+
+    ax.set_xlim(0, bin_w)
+    ax.set_ylim(0, bin_h)
+    ax.set_aspect('equal')
+    ax.set_title(f'{title}\n充填率: {fill_rate:.1f}%  (アイテム数: {len(polygons)})')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+
+    if show:
+        plt.tight_layout()
+        plt.show()
+
+    return ax

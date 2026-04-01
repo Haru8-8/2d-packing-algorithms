@@ -1,50 +1,19 @@
 """
 app.py
-2次元矩形パッキング アルゴリズム比較デモ（Streamlit）
+2次元パッキング アルゴリズム比較デモ（Streamlit）
 
-手法:
-    1. BL法（単純版）   O(n^4)
-    2. BL法（NFP版）    O(n^2 log n)
-    3. 焼きなまし法     NFP版BL法 + 配置順序の最適化
+タブ1: 矩形パッキング
+    - BL法（単純版）O(n^4)
+    - BL法（NFP版）O(n^2 log n)
+    - 焼きなまし法
+
+タブ2: 多角形パッキング
+    - 多角形BL法（回転あり・非凸対応）
 """
 
 import time
 import matplotlib
-matplotlib.use("Agg")  # Streamlit では非インタラクティブバックエンドを使用
-
-# ---------------------------------------------------------------------------
-# 日本語設定
-# ---------------------------------------------------------------------------
-
-def _setup_japanese_font():
-    import subprocess
-    from matplotlib import font_manager
-    import matplotlib as mpl
-
-    # フォントキャッシュをクリアして再スキャン
-    font_manager._load_fontmanager(try_read_cache=False)
-
-    for font in font_manager.fontManager.ttflist:
-        if 'Noto' in font.name and 'CJK' in font.name:
-            mpl.rcParams['font.family'] = font.name
-            return
-
-    # Noto CJK が見つからない場合はファイルパスで直接探す
-    import glob
-    patterns = [
-        '/usr/share/fonts/**/Noto*CJK*.ttc',
-        '/usr/share/fonts/**/Noto*CJK*.otf',
-        '/usr/share/fonts/**/*noto*cjk*.ttc',
-    ]
-    for pattern in patterns:
-        files = glob.glob(pattern, recursive=True)
-        if files:
-            font_manager.fontManager.addfont(files[0])
-            prop = font_manager.FontProperties(fname=files[0])
-            mpl.rcParams['font.family'] = prop.get_name()
-            return
-
-_setup_japanese_font()
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -55,6 +24,48 @@ import streamlit as st
 from algorithms.bottom_left         import bl_method
 from algorithms.nfp_bottom_left     import bl_method_nfp
 from algorithms.simulated_annealing import simulated_annealing
+from algorithms.polygon_bl          import bl_method_polygon
+from algorithms.nfp_polygon         import make_polygon
+from utils.visualizer               import plot_polygon_packing
+
+# ---------------------------------------------------------------------------
+# フォント設定
+# ---------------------------------------------------------------------------
+def _setup_japanese_font():
+    import glob
+    from matplotlib import font_manager
+    import matplotlib as mpl
+
+    font_manager._load_fontmanager(try_read_cache=False)
+
+    for font in font_manager.fontManager.ttflist:
+        if 'Noto' in font.name and 'CJK' in font.name:
+            mpl.rcParams['font.family'] = font.name
+            mpl.rcParams['font.sans-serif'] = [font.name]
+            return
+
+    patterns = [
+        '/usr/share/fonts/**/Noto*CJK*.ttc',
+        '/usr/share/fonts/**/Noto*CJK*.otf',
+    ]
+    for pattern in patterns:
+        files = glob.glob(pattern, recursive=True)
+        if files:
+            font_manager.fontManager.addfont(files[0])
+            prop = font_manager.FontProperties(fname=files[0])
+            mpl.rcParams['font.family'] = prop.get_name()
+            mpl.rcParams['font.sans-serif'] = [prop.get_name()]
+            return
+
+    # Mac環境
+    candidates = ["Hiragino Sans", "Hiragino Maru Gothic Pro"]
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    for font in candidates:
+        if font in available:
+            mpl.rcParams['font.family'] = font
+            return
+
+_setup_japanese_font()
 
 # ---------------------------------------------------------------------------
 # ページ設定
@@ -66,10 +77,10 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# ユーティリティ関数
+# 共通ユーティリティ
 # ---------------------------------------------------------------------------
 
-def make_rects(n: int, w_min: int, w_max: int, h_min: int, h_max: int, seed: int):
+def make_rects(n, w_min, w_max, h_min, h_max, seed):
     rng = np.random.default_rng(seed=seed)
     return [
         (float(rng.integers(w_min, w_max + 1)),
@@ -78,14 +89,17 @@ def make_rects(n: int, w_min: int, w_max: int, h_min: int, h_max: int, seed: int
     ]
 
 
-def fill_rate(rects, positions, bin_w) -> float:
+def fill_rate_rect(rects, positions, bin_w):
     used_h = max(y + h for (_, h), (_, y) in zip(rects, positions))
-    total  = sum(w * h for w, h in rects)
-    return total / (bin_w * used_h) * 100
+    return sum(w * h for w, h in rects) / (bin_w * used_h) * 100
 
 
-def plot_result(rects, positions, bin_w, title, fill, elapsed=None):
-    """配置結果を matplotlib Figure で返す。"""
+def fill_rate_polygon(polygons, positions, bin_w):
+    used_h = max(pos[1] + poly.bounds[3] for poly, pos in zip(polygons, positions))
+    return sum(p.area for p in polygons) / (bin_w * used_h) * 100
+
+
+def plot_rect_result(rects, positions, bin_w, title, fill, elapsed=None):
     used_h = max(y + h for (_, h), (_, y) in zip(rects, positions))
     fig, ax = plt.subplots(figsize=(5, 5 * used_h / bin_w))
 
@@ -93,8 +107,8 @@ def plot_result(rects, positions, bin_w, title, fill, elapsed=None):
         (0, 0), bin_w, used_h * 1.02,
         lw=2, ec="black", fc="whitesmoke"
     ))
-
     colors = cm.tab20(np.linspace(0, 1, max(len(rects), 1)))
+
     for i, ((w, h), (x, y)) in enumerate(zip(rects, positions)):
         ax.add_patch(patches.Rectangle(
             (x, y), w, h,
@@ -122,8 +136,7 @@ def plot_result(rects, positions, bin_w, title, fill, elapsed=None):
     return fig
 
 
-def plot_convergence(history, initial_height, best_height):
-    """焼きなまし法の収束曲線を返す。"""
+def plot_convergence(history, best_height):
     iters        = [h[0] for h in history]
     heights_cur  = [h[1] for h in history]
     heights_best = [h[2] for h in history]
@@ -143,11 +156,11 @@ def plot_convergence(history, initial_height, best_height):
 
 
 def plot_bar_comparison(labels, fills, times):
-    """充填率と実行時間の棒グラフを返す。"""
     fig, axes = plt.subplots(1, 2, figsize=(8, 3))
     colors = ["#B5D4F4", "#9FE1CB", "#F5C4B3"]
 
-    axes[0].bar(labels, fills, color=colors[:len(labels)],
+    axes[0].bar(labels, fills,
+                color=colors[:len(labels)],
                 edgecolor=["#185FA5", "#0F6E56", "#993C1D"][:len(labels)])
     axes[0].set_ylabel("充填率 (%)")
     axes[0].set_title("充填率の比較")
@@ -156,7 +169,8 @@ def plot_bar_comparison(labels, fills, times):
         axes[0].text(i, v + 0.5, f"{v:.1f}%", ha="center", fontsize=9)
     axes[0].grid(True, alpha=0.3, axis="y")
 
-    axes[1].bar(labels, times, color=colors[:len(labels)],
+    axes[1].bar(labels, times,
+                color=colors[:len(labels)],
                 edgecolor=["#185FA5", "#0F6E56", "#993C1D"][:len(labels)])
     axes[1].set_ylabel("実行時間 (s)")
     axes[1].set_title("実行時間の比較")
@@ -167,182 +181,319 @@ def plot_bar_comparison(labels, fills, times):
     plt.tight_layout()
     return fig
 
-# ---------------------------------------------------------------------------
-# サイドバー：パラメータ設定
-# ---------------------------------------------------------------------------
-st.sidebar.title("⚙️ パラメータ設定")
-
-st.sidebar.subheader("問題設定")
-n_rects = st.sidebar.slider("矩形数 n", min_value=5, max_value=50, value=15, step=5)
-bin_w   = st.sidebar.slider("ビン幅 W", min_value=10, max_value=60, value=30, step=5)
-w_min   = st.sidebar.slider("幅の最小値", min_value=1, max_value=10, value=2)
-w_max   = st.sidebar.slider("幅の最大値", min_value=2, max_value=15, value=8)
-h_min   = st.sidebar.slider("高さの最小値", min_value=1, max_value=10, value=2)
-h_max   = st.sidebar.slider("高さの最大値", min_value=2, max_value=15, value=8)
-seed    = st.sidebar.number_input("乱数シード", min_value=0, max_value=999, value=42)
-
-st.sidebar.subheader("手法の選択")
-use_simple = st.sidebar.checkbox("BL法（単純版）", value=False,
-                                  help="O(n⁴)。n が大きいと時間がかかります。")
-use_nfp    = st.sidebar.checkbox("BL法（NFP版）",  value=True,
-                                  help="O(n²logn)。高速で単純版と同じ結果。")
-use_sa     = st.sidebar.checkbox("焼きなまし法",    value=True,
-                                  help="NFP版BL法 + 配置順序の最適化。")
-
-if use_sa:
-    st.sidebar.subheader("焼きなまし法のパラメータ")
-    max_iter = st.sidebar.select_slider(
-        "反復数", options=[1000, 2000, 5000, 10000, 20000], value=5000
-    )
-    cooling  = st.sidebar.select_slider(
-        "冷却率", options=[0.990, 0.993, 0.995, 0.997, 0.999], value=0.995
-    )
-    t_start  = st.sidebar.slider("初期温度", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
-    neighbor = st.sidebar.radio("近傍操作", ["swap", "insert"], index=0)
-
-run_btn = st.sidebar.button("▶ 実行", type="primary", use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# メインエリア
+# メインタイトル
 # ---------------------------------------------------------------------------
-st.title("📦 2D 矩形パッキング：アルゴリズム比較デモ")
-st.markdown("""
-矩形をビン（幅固定・高さ可変）に詰め込む **2次元ストリップパッキング問題** を、
-3つのアルゴリズムで解いて比較します。
-""")
+st.title("📦 2D パッキング：アルゴリズム比較デモ")
+st.markdown("矩形・多角形を幅固定のビンに詰め込む **2次元ストリップパッキング問題** を、複数のアルゴリズムで解いて比較します。")
 
-with st.expander("📖 アルゴリズムの説明"):
-    st.markdown("""
+tab_rect, tab_poly = st.tabs(["🔲 矩形パッキング", "🔷 多角形パッキング"])
+
+# ===========================================================================
+# タブ1: 矩形パッキング
+# ===========================================================================
+with tab_rect:
+    with st.expander("📖 アルゴリズムの説明"):
+        st.markdown("""
 | 手法 | 計算量 | 概要 |
 |------|--------|------|
 | **BL法（単純版）** | O(n⁴) | 候補点を全列挙し、最も左下に配置する貪欲法 |
 | **BL法（NFP版）** | O(n²logn) | No-Fit Polygon + 走査線で高速化した BL法 |
 | **焼きなまし法** | — | NFP版BL法 + 配置順序を焼きなまし法で最適化 |
-
-**参考文献:**
-- 今堀慎治 他, "Python による図形詰込みアルゴリズム入門", OR 学会誌, 2018.
-- 今堀・今堀・柳浦, "3次元パッキングに対する効率的な bottom-left", 数理解析研究所, 2011.
-- Imamichi et al., "An iterated local search algorithm based on nonlinear programming
-  for the irregular strip packing problem", Technical Report, Kyoto University, 2007.
 """)
 
-if not run_btn:
-    st.info("👈 サイドバーでパラメータを設定して「▶ 実行」を押してください。")
-    st.stop()
+    col_left, col_right = st.columns([1, 3])
 
-if not (use_simple or use_nfp or use_sa):
-    st.warning("手法を1つ以上選択してください。")
-    st.stop()
+    with col_left:
+        st.subheader("⚙️ パラメータ設定")
+        st.markdown("**問題設定**")
+        n_rects = st.slider("矩形数 n", 5, 50, 15, 5, key="rect_n")
+        bin_w_r = st.slider("ビン幅 W", 10, 60, 30, 5, key="rect_bw")
+        w_min   = st.slider("幅の最小値", 1, 10, 2, key="rect_wmin")
+        w_max   = st.slider("幅の最大値", 2, 15, 8, key="rect_wmax")
+        h_min   = st.slider("高さの最小値", 1, 10, 2, key="rect_hmin")
+        h_max   = st.slider("高さの最大値", 2, 15, 8, key="rect_hmax")
+        seed_r  = st.number_input("乱数シード", 0, 999, 42, key="rect_seed")
 
-if use_simple and n_rects > 30:
-    st.warning(f"⚠️ 単純版BL法は n={n_rects} だと時間がかかる場合があります（O(n⁴)）。")
+        st.markdown("**手法の選択**")
+        use_simple = st.checkbox("BL法（単純版）", value=False,
+                                  help="O(n⁴)。n が大きいと時間がかかります。")
+        use_nfp    = st.checkbox("BL法（NFP版）",  value=True)
+        use_sa     = st.checkbox("焼きなまし法",    value=True)
 
-# ---------------------------------------------------------------------------
-# 実行
-# ---------------------------------------------------------------------------
-rects = make_rects(n_rects, w_min, w_max, h_min, h_max, seed)
+        if use_sa:
+            st.markdown("**焼きなまし法のパラメータ**")
+            max_iter = st.select_slider("反復数", [1000,2000,5000,10000,20000], 5000, key="sa_iter")
+            cooling  = st.select_slider("冷却率", [0.990,0.993,0.995,0.997,0.999], 0.995, key="sa_cool")
+            t_start  = st.slider("初期温度", 1.0, 20.0, 5.0, 1.0, key="sa_temp")
+            neighbor = st.radio("近傍操作", ["swap", "insert"], key="sa_nb")
 
-results   = {}  # label -> {positions, fill, elapsed}
-sa_result = None
+        run_rect = st.button("▶ 実行", type="primary", use_container_width=True, key="run_rect")
 
-with st.spinner("計算中..."):
-    if use_simple:
-        t0 = time.perf_counter()
-        pos, _ = bl_method(rects, bin_w, sort_key="area")
-        elapsed = time.perf_counter() - t0
-        results["BL法（単純版）"] = {
-            "positions": pos,
-            "fill": fill_rate(rects, pos, bin_w),
-            "elapsed": elapsed,
-        }
+    with col_right:
+        if not run_rect:
+            st.info("👈 パラメータを設定して「▶ 実行」を押してください。")
+        else:
+            if not (use_simple or use_nfp or use_sa):
+                st.warning("手法を1つ以上選択してください。")
+            else:
+                if use_simple and n_rects > 30:
+                    st.warning(f"⚠️ 単純版BL法は n={n_rects} だと時間がかかる場合があります。")
 
-    if use_nfp:
-        t0 = time.perf_counter()
-        pos, _ = bl_method_nfp(rects, bin_w, sort_key="area")
-        elapsed = time.perf_counter() - t0
-        results["BL法（NFP版）"] = {
-            "positions": pos,
-            "fill": fill_rate(rects, pos, bin_w),
-            "elapsed": elapsed,
-        }
+                rects = make_rects(n_rects, w_min, w_max, h_min, h_max, seed_r)
+                results_r = {}
+                sa_result = None
 
-    if use_sa:
-        sa_result = simulated_annealing(
-            rects, bin_w,
-            t_start=t_start, t_end=0.01,
-            cooling=cooling,
-            max_iter=max_iter,
-            neighbor=neighbor,
-            seed=int(seed),
-            log_interval=max(1, max_iter // 50),
-        )
-        results["焼きなまし法"] = {
-            "positions": sa_result.best_positions,
-            "fill": fill_rate(rects, sa_result.best_positions, bin_w),
-            "elapsed": sa_result.elapsed,
-        }
+                with st.spinner("計算中..."):
+                    if use_simple:
+                        t0 = time.perf_counter()
+                        pos, _ = bl_method(rects, bin_w_r, sort_key="area")
+                        elapsed = time.perf_counter() - t0
+                        results_r["BL法（単純版）"] = {
+                            "positions": pos, "fill": fill_rate_rect(rects, pos, bin_w_r), "elapsed": elapsed
+                        }
 
-# ---------------------------------------------------------------------------
-# 結果表示：配置図
-# ---------------------------------------------------------------------------
-st.subheader("📊 配置結果")
+                    if use_nfp:
+                        t0 = time.perf_counter()
+                        pos, _ = bl_method_nfp(rects, bin_w_r, sort_key="area")
+                        elapsed = time.perf_counter() - t0
+                        results_r["BL法（NFP版）"] = {
+                            "positions": pos, "fill": fill_rate_rect(rects, pos, bin_w_r), "elapsed": elapsed
+                        }
 
-cols = st.columns(len(results))
-for col, (label, res) in zip(cols, results.items()):
-    with col:
-        fig = plot_result(
-            rects, res["positions"], bin_w,
-            label, res["fill"], res["elapsed"]
-        )
-        st.pyplot(fig)
-        plt.close(fig)
+                    if use_sa:
+                        sa_result = simulated_annealing(
+                            rects, bin_w_r,
+                            t_start=t_start, t_end=0.01,
+                            cooling=cooling, max_iter=max_iter,
+                            neighbor=neighbor, seed=int(seed_r),
+                            log_interval=max(1, max_iter // 50),
+                        )
+                        results_r["焼きなまし法"] = {
+                            "positions": sa_result.best_positions,
+                            "fill": fill_rate_rect(rects, sa_result.best_positions, bin_w_r),
+                            "elapsed": sa_result.elapsed,
+                        }
 
-# ---------------------------------------------------------------------------
-# 結果表示：比較グラフ
-# ---------------------------------------------------------------------------
-st.subheader("📈 比較グラフ")
+                st.subheader("📊 配置結果")
+                cols = st.columns(len(results_r))
+                for col, (label, res) in zip(cols, results_r.items()):
+                    with col:
+                        fig = plot_rect_result(rects, res["positions"], bin_w_r,
+                                               label, res["fill"], res["elapsed"])
+                        st.pyplot(fig)
+                        plt.close(fig)
 
-labels = list(results.keys())
-fills  = [results[l]["fill"]    for l in labels]
-times  = [results[l]["elapsed"] for l in labels]
+                st.subheader("📈 比較グラフ")
+                labels = list(results_r.keys())
+                fills  = [results_r[l]["fill"]    for l in labels]
+                times  = [results_r[l]["elapsed"] for l in labels]
+                fig_bar = plot_bar_comparison(labels, fills, times)
+                st.pyplot(fig_bar)
+                plt.close(fig_bar)
 
-fig_bar = plot_bar_comparison(labels, fills, times)
-st.pyplot(fig_bar)
-plt.close(fig_bar)
+                if use_sa and sa_result is not None:
+                    st.subheader("🌡️ 焼きなまし法：収束の様子")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        fig_conv = plot_convergence(sa_result.history, sa_result.best_height)
+                        st.pyplot(fig_conv)
+                        plt.close(fig_conv)
+                    with col2:
+                        init_fill = fill_rate_rect(
+                            rects, bl_method_nfp(rects, bin_w_r, sort_key="area")[0], bin_w_r
+                        )
+                        best_fill = results_r["焼きなまし法"]["fill"]
+                        st.metric("初期充填率", f"{init_fill:.1f}%")
+                        st.metric("最良充填率", f"{best_fill:.1f}%",
+                                  delta=f"{best_fill - init_fill:+.1f}%")
 
-# ---------------------------------------------------------------------------
-# 焼きなまし法：収束曲線
-# ---------------------------------------------------------------------------
-if use_sa and sa_result is not None:
-    st.subheader("🌡️ 焼きなまし法：収束の様子")
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        fig_conv = plot_convergence(
-            sa_result.history,
-            sa_result.initial_height,
-            sa_result.best_height,
-        )
-        st.pyplot(fig_conv)
-        plt.close(fig_conv)
-    with col2:
-        st.metric("初期解の高さ", f"{sa_result.initial_height:.1f}")
-        st.metric("最良解の高さ", f"{sa_result.best_height:.1f}",
-                  delta=f"{sa_result.best_height - sa_result.initial_height:.1f}")
-        init_fill = fill_rate(rects,
-                              bl_method_nfp(rects, bin_w, sort_key="area")[0],
-                              bin_w)
-        best_fill = results["焼きなまし法"]["fill"]
-        st.metric("初期充填率", f"{init_fill:.1f}%")
-        st.metric("最良充填率", f"{best_fill:.1f}%",
-                  delta=f"{best_fill - init_fill:+.1f}%")
+                st.subheader("📋 数値サマリー")
+                st.dataframe({
+                    "手法": labels,
+                    "充填率 (%)": [f"{f:.1f}" for f in fills],
+                    "実行時間 (s)": [f"{t:.4f}" for t in times],
+                }, use_container_width=True)
 
-# ---------------------------------------------------------------------------
-# 数値サマリー
-# ---------------------------------------------------------------------------
-st.subheader("📋 数値サマリー")
-summary_data = {
-    "手法": labels,
-    "充填率 (%)": [f"{f:.1f}" for f in fills],
-    "実行時間 (s)": [f"{t:.4f}" for t in times],
-}
-st.dataframe(summary_data, use_container_width=True)
+# ===========================================================================
+# タブ2: 多角形パッキング
+# ===========================================================================
+with tab_poly:
+    with st.expander("📖 アルゴリズムの説明"):
+        st.markdown("""
+| 項目 | 内容 |
+|------|------|
+| **対応図形** | 凸多角形・非凸多角形 |
+| **回転** | 0 / 90 / 180 / 270 度（離散的） |
+| **NFP計算** | pyclipper の MinkowskiDiff を使用 |
+| **キャッシュ** | 全ペアのNFP・IFRを事前計算 |
+""")
+
+
+    # ランダム生成用のベース図形
+    BASE_SHAPES = [
+        [(0,0),(20,0),(20,10),(10,10),(10,20),(0,20)],   # L字型
+        [(0,0),(30,0),(30,10),(20,10),(20,20),(10,20),(10,10),(0,10)],  # U字型
+        [(0,0),(15,0),(15,15),(0,15)],                   # 正方形
+        [(0,0),(30,0),(30,8),(0,8)],                     # 横長矩形
+        [(0,0),(8,0),(8,30),(0,30)],                     # 縦長矩形
+        [(0,0),(20,0),(20,20),(10,20),(10,10),(0,10)],   # 逆L字型
+        [(0,0),(25,0),(25,10),(0,10)],                   # 横長矩形2
+        [(0,0),(10,0),(10,25),(0,25)],                   # 縦長矩形2
+        [(0,0),(15,0),(15,20),(0,20)],                   # 縦長矩形3
+        [(0,0),(20,0),(20,15),(0,15)],                   # 矩形
+    ]
+
+    # プリセット図形の定義
+    PRESETS = {
+        "end0tknr例題（L字・三角形）": {
+            "vertices_list": [
+                [(0,0),(20,0),(20,50),(0,50)],
+                [(0,0),(40,0),(40,50),(20,50),(20,30),(0,30)],
+                [(0,0),(20,0),(20,20),(0,20)],
+                [(0,0),(40,0),(40,30)],
+                [(0,0),(40,30),(40,50),(0,50)],
+            ],
+            "bin_w": 120,
+        },
+        "非凸図形セット（L字・U字）": {
+            "vertices_list": [
+                [(0,0),(20,0),(20,10),(10,10),(10,20),(0,20)],
+                [(0,0),(30,0),(30,10),(20,10),(20,20),(10,20),(10,10),(0,10)],
+                [(0,0),(10,0),(10,10),(0,10)],
+                [(0,0),(20,0),(20,5),(0,5)],
+                [(0,0),(5,0),(5,20),(0,20)],
+            ],
+            "bin_w": 60,
+        },
+        "縦横比が異なる矩形（回転の効果が出やすい）": {
+            "vertices_list": [
+                [(0,0),(40,0),(40,10),(0,10)],
+                [(0,0),(5,0),(5,30),(0,30)],
+                [(0,0),(30,0),(30,5),(0,5)],
+                [(0,0),(20,0),(20,15),(0,15)],
+                [(0,0),(8,0),(8,25),(0,25)],
+            ],
+            "bin_w": 50,
+        },
+        "ランダム生成（大量図形）": {
+            "vertices_list": None,  # 動的に生成
+            "bin_w": 100,
+        },
+    }
+
+    col_left2, col_right2 = st.columns([1, 3])
+
+    with col_left2:
+        st.subheader("⚙️ パラメータ設定")
+
+        preset_name = st.selectbox("プリセット図形", list(PRESETS.keys()))
+        preset = PRESETS[preset_name]
+
+        bin_w_p = st.slider("ビン幅 W", 30, 200,
+                            preset["bin_w"], 10, key="poly_bw")
+
+        if preset_name == "ランダム生成（大量図形）":
+            n_poly = st.slider("図形数 n", 10, 50, 20, 5, key="poly_n")
+            seed_p = st.number_input("乱数シード", 0, 999, 42, key="poly_seed")
+        else:
+            n_poly = None
+            seed_p = None
+
+        st.markdown("**回転角の設定**")
+        st.caption("回転なし（0度のみ）と比較します")
+        use_0   = st.checkbox("0度",   value=True,  key="rot0")
+        use_90  = st.checkbox("90度",  value=True,  key="rot90")
+        use_180 = st.checkbox("180度", value=False, key="rot180")
+        use_270 = st.checkbox("270度", value=False, key="rot270")
+
+        run_poly = st.button("▶ 実行", type="primary",
+                             use_container_width=True, key="run_poly")
+
+    with col_right2:
+        if not run_poly:
+            st.info("👈 パラメータを設定して「▶ 実行」を押してください。")
+        else:
+            orientations = []
+            if use_0:   orientations.append(0)
+            if use_90:  orientations.append(90)
+            if use_180: orientations.append(180)
+            if use_270: orientations.append(270)
+
+            if not orientations:
+                st.warning("回転角を1つ以上選択してください。")
+                st.stop()
+
+            # ランダム生成の場合はベース図形からランダムに選ぶ
+            if preset["vertices_list"] is None:
+                import random
+                rng_p = random.Random(int(seed_p))
+                vertices_list = [
+                    rng_p.choice(BASE_SHAPES) for _ in range(n_poly)
+                ]
+            else:
+                vertices_list = preset["vertices_list"]
+
+            with st.spinner("NFPを計算中...（図形数・回転角数によって時間がかかります）"):
+                # 回転なし
+                t0 = time.perf_counter()
+                pos_no, thetas_no, polys_no = bl_method_polygon(
+                    vertices_list, bin_w_p,
+                    orientations=[0], sort_key='area',
+                )
+                t_no = time.perf_counter() - t0
+
+                # 回転あり
+                t0 = time.perf_counter()
+                pos_rot, thetas_rot, polys_rot = bl_method_polygon(
+                    vertices_list, bin_w_p,
+                    orientations=orientations, sort_key='area',
+                )
+                t_rot = time.perf_counter() - t0
+
+            fill_no  = fill_rate_polygon(polys_no,  pos_no,  bin_w_p)
+            fill_rot = fill_rate_polygon(polys_rot, pos_rot, bin_w_p)
+
+            st.subheader("📊 配置結果の比較")
+            col_r1, col_r2 = st.columns(2)
+
+            with col_r1:
+                st.markdown("**回転なし（0度のみ）**")
+                fig1, ax1 = plt.subplots(figsize=(5, 4))
+                plot_polygon_packing(
+                    polys_no, pos_no, bin_w_p,
+                    title=f"回転なし\n充填率: {fill_no:.1f}%  |  実行時間: {t_no:.3f}s",
+                    ax=ax1, show=False,
+                )
+                st.pyplot(fig1)
+                plt.close(fig1)
+
+            with col_r2:
+                st.markdown(f"**回転あり（{orientations}度）**")
+                fig2, ax2 = plt.subplots(figsize=(5, 4))
+                plot_polygon_packing(
+                    polys_rot, pos_rot, bin_w_p,
+                    title=f"回転あり {orientations}\n充填率: {fill_rot:.1f}%  |  実行時間: {t_rot:.3f}s",
+                    ax=ax2, show=False,
+                )
+                st.pyplot(fig2)
+                plt.close(fig2)
+
+            st.subheader("📈 充填率の比較")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            with col_m1:
+                st.metric("回転なし", f"{fill_no:.1f}%")
+            with col_m2:
+                st.metric("回転あり", f"{fill_rot:.1f}%",
+                          delta=f"{fill_rot - fill_no:+.1f}%")
+            with col_m3:
+                st.metric("実行時間（回転あり）", f"{t_rot:.3f}s")
+
+            st.subheader("📋 配置詳細（回転あり）")
+            st.dataframe({
+                "図形": [f"図形{i}" for i in range(len(vertices_list))],
+                "参照点 x": [f"{pos_rot[i][0]:.1f}" for i in range(len(vertices_list))],
+                "参照点 y": [f"{pos_rot[i][1]:.1f}" for i in range(len(vertices_list))],
+                "回転角 (度)": [thetas_rot[i] for i in range(len(vertices_list))],
+            }, use_container_width=True)
