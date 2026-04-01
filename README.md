@@ -1,6 +1,6 @@
 # 配置最適化アルゴリズム（2次元パッキング問題）
 
-矩形配置問題（2D Packing）に対して、複数のアルゴリズムを実装・比較した最適化プロジェクトです。
+矩形・多角形の配置問題（2D Packing）に対して、複数のアルゴリズムを実装・比較した最適化プロジェクトです。
 
 👉 **限られたスペースに対して効率的な配置を求める問題を解決できます。**
 
@@ -29,8 +29,11 @@
 ---
 
 ## デモ
-矩形サイズ・個数を指定し、各アルゴリズムの配置結果を比較できます  
+矩形・多角形のサイズ・個数を指定し、各アルゴリズムの配置結果を比較できます
+### アプリ画面
+![アプリ画面](docs/screenshots/app_screenshot.png)
 
+### デモURL
 Streamlit Cloud でインタラクティブデモを公開しています。  
 → **https://2d-packing-algorithms-r3lvpgajmvk2earrnhl3dk.streamlit.app/**
 
@@ -39,7 +42,8 @@ Streamlit Cloud でインタラクティブデモを公開しています。
 ## 主な機能
 
 - **複数アルゴリズムの比較**: BL法・NFP・焼きなまし法を実装
-- **可視化による検証**: 配置結果をグラフとして確認可能
+- **多角形パッキング対応**: 凸・非凸多角形、回転あり（0/90/180/270度）に対応
+- **可視化による検証**: 配置結果を図として確認可能
 - **性能比較（ベンチマーク）**: 実行時間・充填率を定量的に比較
 - **インタラクティブ操作**: Streamlitによりパラメータ変更・結果確認が可能
 
@@ -47,11 +51,19 @@ Streamlit Cloud でインタラクティブデモを公開しています。
 
 ## 実装アルゴリズム
 
+### 矩形パッキング
+
 | 手法 | 特徴 | 計算量 | ファイル |
 |------|------|--------|---------|
 | BL法（単純版） | 実装がシンプルだが計算量が大きい | O(n⁴) | `algorithms/bottom_left.py` |
 | BL法（NFP版） | 幾何的処理により高速化 | O(n²logn) | `algorithms/nfp_bottom_left.py` |
 | 焼きなまし法 | 確率的探索により高品質解を探索 | — | `algorithms/simulated_annealing.py` |
+
+### 多角形パッキング
+
+| 手法 | 特徴 | ファイル |
+|------|------|---------|
+| 多角形BL法 | 凸・非凸多角形対応、回転あり、NFPキャッシュによる高速化 | `algorithms/polygon_bl.py` |
 
 ---
 
@@ -83,6 +95,8 @@ Streamlit Cloud でインタラクティブデモを公開しています。
 - **計算量改善の実装**: O(n⁴) → O(n²logn) への最適化
 - **幾何アルゴリズムの応用（NFP）**: 複雑な配置制約を効率的に処理
 - **メタヒューリスティクスの導入**: 焼きなまし法による近似最適解の探索
+- **多角形パッキングへの拡張**: pyclipperのMinkowskiDiffを用いた多角形NFPの計算
+- **NFPキャッシュ**: 全図形ペア×全回転角のNFPを事前計算して配置フェーズを高速化
 - **可視化による検証**: アルゴリズムの挙動を視覚的に確認
 
 ---
@@ -96,13 +110,16 @@ packing/
 ├── algorithms/
 │   ├── bottom_left.py               # BL法（単純版 O(n^4)）
 │   ├── nfp_bottom_left.py           # BL法（NFP版 O(n^2 log n)）
-│   └── simulated_annealing.py       # 焼きなまし法
+│   ├── simulated_annealing.py       # 焼きなまし法
+│   ├── nfp_polygon.py               # 多角形NFP・IFRの計算とキャッシュ管理
+│   └── polygon_bl.py                # 多角形BL法（凸・非凸・回転対応）
 ├── utils/
 │   └── visualizer.py                # matplotlib 可視化ユーティリティ
 └── notebooks/
     ├── 01_bottom_left.ipynb         # BL法の復習・動作確認
     ├── 02_nfp_bottom_left.ipynb     # NFP実装・速度比較ベンチマーク
-    └── 03_simulated_annealing.ipynb # 焼きなまし法・収束確認
+    ├── 03_simulated_annealing.ipynb # 焼きなまし法・収束確認
+    └── 04_polygon_bl.ipynb          # 多角形BL法の動作確認
 ```
 
 ---
