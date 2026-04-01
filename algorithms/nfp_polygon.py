@@ -164,8 +164,13 @@ def calc_nfp_polygon(
             if not p.is_valid or p.area <= 0:
                 continue
             if p.geom_type == 'MultiPolygon':
-                p = max(p.geoms, key=lambda g: g.area)
-            # exterior.coordsで再生成して内部的な辺を解消する
+                # 和集合を取って連結を試みる
+                from shapely.ops import unary_union
+                p = unary_union(p)
+                if p.geom_type == 'MultiPolygon':
+                    # 和集合を取っても分離したままの場合は面積最大を使う
+                    p = max(p.geoms, key=lambda g: g.area)
+            # exterior.coordsで再生成して内部的な辺を除去する
             p = Polygon(list(p.exterior.coords))
             if not p.is_valid or p.area <= 0:
                 continue
