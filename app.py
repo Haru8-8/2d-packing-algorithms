@@ -9,6 +9,7 @@ app.py
 
 タブ2: 多角形パッキング
     - 多角形BL法（回転あり・非凸対応）
+    - 多角形BL法 + 焼きなまし法（配置順序 × 回転角の最適化）
 """
 
 import time
@@ -21,12 +22,13 @@ import matplotlib.cm as cm
 import numpy as np
 import streamlit as st
 
-from algorithms.bottom_left         import bl_method
-from algorithms.nfp_bottom_left     import bl_method_nfp
-from algorithms.simulated_annealing import simulated_annealing
-from algorithms.polygon_bl          import bl_method_polygon
-from algorithms.nfp_polygon         import make_polygon
-from utils.visualizer               import plot_polygon_packing
+from algorithms.bottom_left                    import bl_method
+from algorithms.nfp_bottom_left               import bl_method_nfp
+from algorithms.simulated_annealing           import simulated_annealing
+from algorithms.polygon_bl                    import bl_method_polygon
+from algorithms.polygon_simulated_annealing   import simulated_annealing_polygon
+from algorithms.nfp_polygon                   import make_polygon
+from utils.visualizer                         import plot_polygon_packing
 
 # ---------------------------------------------------------------------------
 # フォント設定
@@ -322,14 +324,17 @@ with tab_rect:
 with tab_poly:
     with st.expander("📖 アルゴリズムの説明"):
         st.markdown("""
-| 項目 | 内容 |
+| 手法 | 概要 |
 |------|------|
-| **対応図形** | 凸多角形・非凸多角形 |
-| **回転** | 0 / 90 / 180 / 270 度（離散的） |
-| **NFP計算** | pyclipper の MinkowskiDiff を使用 |
-| **キャッシュ** | 全ペアのNFP・IFRを事前計算 |
-""")
+| **多角形BL法** | NFP + IFR を用いた多角形対応の Bottom-Left 法。回転角を離散的に試して最良点を選択。 |
+| **焼きなまし法** | 多角形BL法 + 配置順序 × 回転角の組み合わせを焼きなまし法で最適化。 |
 
+**近傍操作（焼きなまし法）**
+- `swap`   : 配置順序の2要素をスワップ
+- `insert` : 配置順序の1要素を別の位置に挿入
+- `rotate` : 1図形の回転角をランダムに変更
+- `mixed`  : 上記3つをランダムに選択（推奨）
+""")
 
     # ランダム生成用のベース図形
     BASE_SHAPES = [
@@ -408,6 +413,23 @@ with tab_poly:
         use_180 = st.checkbox("180度", value=False, key="rot180")
         use_270 = st.checkbox("270度", value=False, key="rot270")
 
+        st.markdown("**手法の選択**")
+        use_poly_sa = st.checkbox("焼きなまし法", value=True, key="poly_use_sa")
+
+        if use_poly_sa:
+            st.markdown("**焼きなまし法のパラメータ**")
+            poly_max_iter = st.select_slider(
+                "反復数", [500, 1000, 2000, 5000, 10000], 2000, key="poly_sa_iter",
+                help="多角形はBL法の評価コストが高いため、矩形より少ない反復数を推奨します。"
+            )
+            poly_cooling  = st.select_slider(
+                "冷却率", [0.990, 0.993, 0.995, 0.997, 0.999], 0.995, key="poly_sa_cool"
+            )
+            poly_t_start  = st.slider("初期温度", 1.0, 20.0, 5.0, 1.0, key="poly_sa_temp")
+            poly_neighbor = st.radio(
+                "近傍操作", ["mixed", "swap", "insert", "rotate"], key="poly_sa_nb"
+            )
+
         run_poly = st.button("▶ 実行", type="primary",
                              use_container_width=True, key="run_poly")
 
@@ -435,8 +457,29 @@ with tab_poly:
             else:
                 vertices_list = preset["vertices_list"]
 
+            # 焼きなまし法の計算時間警告
+            if use_poly_sa:
+                n_shapes = len(vertices_list)
+                n_rot    = len(orientations)
+                # 実測値（25図形・4回転・1000反復で約3000秒）をもとに目安を算出
+                # 評価1回あたり約3秒 @ n=25, rot=4 → n²×rot に比例して粗く推定
+                sec_per_eval = 3.0 * (n_shapes / 25) ** 2 * (n_rot / 4)
+                est_sec = sec_per_eval * poly_max_iter
+                if est_sec >= 60:
+                    est_str = f"約 {est_sec/60:.0f} 分" if est_sec < 3600 else f"約 {est_sec/3600:.1f} 時間"
+                    st.warning(
+                        f"⚠️ 焼きなまし法の推定実行時間: **{est_str}**（図形数 {n_shapes}、"
+                        f"回転角 {n_rot} 種、反復数 {poly_max_iter}）。"
+                        f"図形数10以下・反復数1000以下での実行を推奨します。"
+                    )
+                elif est_sec >= 10:
+                    st.info(
+                        f"ℹ️ 焼きなまし法の推定実行時間: **約 {est_sec:.0f} 秒**。"
+                        f"しばらくお待ちください。"
+                    )
+
             with st.spinner("NFPを計算中...（図形数・回転角数によって時間がかかります）"):
-                # 回転なし
+                # 回転なし（BL法）
                 t0 = time.perf_counter()
                 pos_no, thetas_no, polys_no = bl_method_polygon(
                     vertices_list, bin_w_p,
@@ -444,7 +487,7 @@ with tab_poly:
                 )
                 t_no = time.perf_counter() - t0
 
-                # 回転あり
+                # 回転あり（BL法）
                 t0 = time.perf_counter()
                 pos_rot, thetas_rot, polys_rot = bl_method_polygon(
                     vertices_list, bin_w_p,
@@ -452,48 +495,128 @@ with tab_poly:
                 )
                 t_rot = time.perf_counter() - t0
 
+                # 焼きなまし法
+                sa_poly_result = None
+                if use_poly_sa:
+                    sa_poly_result = simulated_annealing_polygon(
+                        vertices_list, bin_w_p,
+                        orientations=orientations,
+                        t_start=poly_t_start, t_end=0.01,
+                        cooling=poly_cooling, max_iter=poly_max_iter,
+                        neighbor=poly_neighbor,
+                        seed=int(seed_p) if seed_p is not None else 42,
+                        log_interval=max(1, poly_max_iter // 50),
+                    )
+
             fill_no  = fill_rate_polygon(polys_no,  pos_no,  bin_w_p)
             fill_rot = fill_rate_polygon(polys_rot, pos_rot, bin_w_p)
 
+            # ------------------------------------------------------------------
+            # 配置結果の表示
+            # ------------------------------------------------------------------
             st.subheader("📊 配置結果の比較")
-            col_r1, col_r2 = st.columns(2)
 
-            with col_r1:
-                st.markdown("**回転なし（0度のみ）**")
+            n_cols = 3 if use_poly_sa else 2
+            cols_res = st.columns(n_cols)
+
+            with cols_res[0]:
+                st.markdown("**回転なし（BL法）**")
                 fig1, ax1 = plt.subplots(figsize=(5, 4))
                 plot_polygon_packing(
                     polys_no, pos_no, bin_w_p,
-                    title=f"回転なし\n充填率: {fill_no:.1f}%  |  実行時間: {t_no:.3f}s",
+                    title=f"回転なし\n充填率: {fill_no:.1f}%  |  {t_no:.3f}s",
                     ax=ax1, show=False,
                 )
                 st.pyplot(fig1)
                 plt.close(fig1)
 
-            with col_r2:
-                st.markdown(f"**回転あり（{orientations}度）**")
+            with cols_res[1]:
+                st.markdown(f"**回転あり（BL法）{orientations}度**")
                 fig2, ax2 = plt.subplots(figsize=(5, 4))
                 plot_polygon_packing(
                     polys_rot, pos_rot, bin_w_p,
-                    title=f"回転あり {orientations}\n充填率: {fill_rot:.1f}%  |  実行時間: {t_rot:.3f}s",
+                    title=f"回転あり {orientations}\n充填率: {fill_rot:.1f}%  |  {t_rot:.3f}s",
                     ax=ax2, show=False,
                 )
                 st.pyplot(fig2)
                 plt.close(fig2)
 
+            if use_poly_sa and sa_poly_result is not None:
+                fill_sa = fill_rate_polygon(
+                    sa_poly_result.best_polys, sa_poly_result.best_positions, bin_w_p
+                )
+                with cols_res[2]:
+                    st.markdown("**焼きなまし法**")
+                    fig3, ax3 = plt.subplots(figsize=(5, 4))
+                    plot_polygon_packing(
+                        sa_poly_result.best_polys, sa_poly_result.best_positions, bin_w_p,
+                        title=f"焼きなまし法\n充填率: {fill_sa:.1f}%  |  {sa_poly_result.elapsed:.3f}s",
+                        ax=ax3, show=False,
+                    )
+                    st.pyplot(fig3)
+                    plt.close(fig3)
+
+            # ------------------------------------------------------------------
+            # 比較グラフ・メトリクス
+            # ------------------------------------------------------------------
             st.subheader("📈 充填率の比較")
+
+            if use_poly_sa and sa_poly_result is not None:
+                labels_p = ["BL法（回転なし）", "BL法（回転あり）", "焼きなまし法"]
+                fills_p  = [fill_no, fill_rot, fill_sa]
+                times_p  = [t_no, t_rot, sa_poly_result.elapsed]
+            else:
+                labels_p = ["BL法（回転なし）", "BL法（回転あり）"]
+                fills_p  = [fill_no, fill_rot]
+                times_p  = [t_no, t_rot]
+
+            fig_bar_p = plot_bar_comparison(labels_p, fills_p, times_p)
+            st.pyplot(fig_bar_p)
+            plt.close(fig_bar_p)
+
             col_m1, col_m2, col_m3 = st.columns(3)
             with col_m1:
-                st.metric("回転なし", f"{fill_no:.1f}%")
+                st.metric("BL法（回転なし）", f"{fill_no:.1f}%")
             with col_m2:
-                st.metric("回転あり", f"{fill_rot:.1f}%",
+                st.metric("BL法（回転あり）", f"{fill_rot:.1f}%",
                           delta=f"{fill_rot - fill_no:+.1f}%")
             with col_m3:
-                st.metric("実行時間（回転あり）", f"{t_rot:.3f}s")
+                if use_poly_sa and sa_poly_result is not None:
+                    st.metric("焼きなまし法", f"{fill_sa:.1f}%",
+                              delta=f"{fill_sa - fill_rot:+.1f}% vs BL回転あり")
 
-            st.subheader("📋 配置詳細（回転あり）")
+            # ------------------------------------------------------------------
+            # 焼きなまし法：収束の様子
+            # ------------------------------------------------------------------
+            if use_poly_sa and sa_poly_result is not None:
+                st.subheader("🌡️ 焼きなまし法：収束の様子")
+                col_conv1, col_conv2 = st.columns([2, 1])
+                with col_conv1:
+                    fig_conv = plot_convergence(
+                        sa_poly_result.history, sa_poly_result.best_height
+                    )
+                    st.pyplot(fig_conv)
+                    plt.close(fig_conv)
+                with col_conv2:
+                    st.metric("初期充填率（BL法）", f"{fill_rot:.1f}%")
+                    st.metric("最良充填率（SA）",   f"{fill_sa:.1f}%",
+                              delta=f"{fill_sa - fill_rot:+.1f}%")
+                    st.metric("実行時間", f"{sa_poly_result.elapsed:.2f}s")
+
+                    st.markdown("**最良解の回転角**")
+                    theta_df = {
+                        "図形": [f"図形{i}" for i in range(len(vertices_list))],
+                        "回転角 (度)": [sa_poly_result.best_thetas[i]
+                                       for i in range(len(vertices_list))],
+                    }
+                    st.dataframe(theta_df, use_container_width=True)
+
+            # ------------------------------------------------------------------
+            # 数値サマリー
+            # ------------------------------------------------------------------
+            st.subheader("📋 数値サマリー")
             st.dataframe({
-                "図形": [f"図形{i}" for i in range(len(vertices_list))],
-                "参照点 x": [f"{pos_rot[i][0]:.1f}" for i in range(len(vertices_list))],
-                "参照点 y": [f"{pos_rot[i][1]:.1f}" for i in range(len(vertices_list))],
-                "回転角 (度)": [thetas_rot[i] for i in range(len(vertices_list))],
+                "手法":        labels_p,
+                "充填率 (%)":  [f"{f:.1f}" for f in fills_p],
+                "実行時間 (s)": [f"{t:.4f}" for t in times_p],
             }, use_container_width=True)
