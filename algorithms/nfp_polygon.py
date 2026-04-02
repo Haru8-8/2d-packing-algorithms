@@ -34,23 +34,27 @@ Angle    = int                     # 回転角 (0, 90, 180, 270)
 def make_polygon(vertices: Vertices) -> Polygon:
     """
     整数座標の頂点リストから Shapely Polygon を生成する。
-    参照点（バウンディングボックスの左下）が原点になるよう正規化する。
+    参照点（底辺の最左点）が原点になるよう正規化する。
     """
     poly = Polygon(vertices)
-    min_x, min_y, _, _ = poly.bounds
-    return affinity.translate(poly, xoff=-min_x, yoff=-min_y)
+    _, min_y, _, _ = poly.bounds
+    coords = list(poly.exterior.coords[:-1])
+    ref_x = min(x for x, y in coords if abs(y - min_y) < 1e-9)
+    return affinity.translate(poly, xoff=-ref_x, yoff=-min_y)
 
 
 def rotate_polygon(poly: Polygon, angle_deg: Angle) -> Polygon:
     """
-    図形を参照点（左下）周りに angle_deg 度回転させ、
-    バウンディングボックスの左下が原点になるよう正規化する。
+    図形を参照点（底辺の最左点）周りに angle_deg 度回転させ、
+    回転後の底辺の最左点が原点になるよう正規化する。
     """
     if angle_deg == 0:
         return poly
     rotated = affinity.rotate(poly, angle_deg, origin=(0, 0))
-    min_x, min_y, _, _ = rotated.bounds
-    return affinity.translate(rotated, xoff=-min_x, yoff=-min_y)
+    _, min_y, _, _ = rotated.bounds
+    coords = list(rotated.exterior.coords[:-1])
+    ref_x = min(x for x, y in coords if abs(y - min_y) < 1e-9)
+    return affinity.translate(rotated, xoff=-ref_x, yoff=-min_y)
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +90,7 @@ def calc_ifr_polygon(
     -------
     IFR の Shapely Polygon、または配置不可の場合 None
     """
-    _, _, max_x, max_y = poly.bounds
+    min_x, _, max_x, max_y = poly.bounds
 
     # 底辺（y=0）に接する頂点の中で x が最小のものを座標A とする
     coords = list(poly.exterior.coords[:-1])  # 末尾の重複点を除く
@@ -94,11 +98,13 @@ def calc_ifr_polygon(
 
     if not bottom_coords:
         # y=0 の頂点がない場合はバウンディングボックスで代用
-        ref_x = 0.0
+        ref_x = min_x
     else:
         ref_x = min(bottom_coords)
 
-    ifr_left  = ref_x
+    # ifr_left: 参照点をここに置いたとき図形左端(min_x)がビン左壁(x=0)に接する
+    # ifr_right: 参照点をここに置いたとき図形右端(max_x)がビン右壁(x=bin_w)に接する
+    ifr_left  = ref_x - min_x
     ifr_right = bin_w - (max_x - ref_x)
     ifr_top   = bin_h_max - max_y
 

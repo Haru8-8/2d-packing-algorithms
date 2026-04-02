@@ -31,7 +31,7 @@
 ## デモ
 矩形・多角形のサイズ・個数を指定し、各アルゴリズムの配置結果を比較できます
 ### アプリ画面
-![アプリ画面](docs/screenshots/app_screenshot.png)
+![アプリ画面](docs/screenshots/app_screenshot_simulated_annealing_polygon.png)
 
 ### デモURL
 Streamlit Cloud でインタラクティブデモを公開しています。  
@@ -64,6 +64,7 @@ Streamlit Cloud でインタラクティブデモを公開しています。
 | 手法 | 特徴 | ファイル |
 |------|------|---------|
 | 多角形BL法 | 凸・非凸多角形対応、回転あり、NFPキャッシュによる高速化 | `algorithms/polygon_bl.py` |
+| 多角形焼きなまし法 | 配置順序×回転角の組み合わせを焼きなまし法で最適化 | `algorithms/polygon_simulated_annealing.py` |
 
 ---
 
@@ -81,6 +82,10 @@ Streamlit Cloud でインタラクティブデモを公開しています。
 
 10問の平均: BL法 **86.1%** → 焼きなまし法 **94.9%**（平均 **+8.8%** 改善）
 
+### 多角形BL法 vs 多角形焼きなまし法（充填率比較）
+
+ランダム生成25図形・ビン幅90の条件: BL法（回転なし）**81.4%** → 焼きなまし法 **89.6%**（**+8.2%** 改善）
+
 ---
 
 ## 関連記事
@@ -88,6 +93,7 @@ Streamlit Cloud でインタラクティブデモを公開しています。
 - [2次元パッキング問題におけるBottom-Left法とNFPを用いた高速化の実装](https://qiita.com/Haru8-8/items/438f87b89f065f29a6f4)
 - [焼きなまし法による2次元パッキング問題の充填率改善](https://qiita.com/Haru8-8/items/cf04753edaa9f1ebec9e)
 - [pyclipperを用いた多角形パッキング問題へのBL法の拡張と回転対応](https://qiita.com/Haru8-8/items/b474b5fcb93c6faacbef)
+- [焼きなまし法による多角形パッキング問題の充填率改善（配置順序×回転角の最適化）](https://qiita.com/Haru8-8/items/16adef7bfce77662f3ea)
 
 ---
 
@@ -113,14 +119,16 @@ packing/
 │   ├── nfp_bottom_left.py           # BL法（NFP版 O(n^2 log n)）
 │   ├── simulated_annealing.py       # 焼きなまし法
 │   ├── nfp_polygon.py               # 多角形NFP・IFRの計算とキャッシュ管理
-│   └── polygon_bl.py                # 多角形BL法（凸・非凸・回転対応）
+│   ├── polygon_bl.py                # 多角形BL法（凸・非凸・回転対応）
+│   └── polygon_simulated_annealing.py # 多角形焼きなまし法（配置順序×回転角の最適化）
 ├── utils/
 │   └── visualizer.py                # matplotlib 可視化ユーティリティ
 └── notebooks/
     ├── 01_bottom_left.ipynb         # BL法の復習・動作確認
     ├── 02_nfp_bottom_left.ipynb     # NFP実装・速度比較ベンチマーク
     ├── 03_simulated_annealing.ipynb # 焼きなまし法・収束確認
-    └── 04_polygon_bl.ipynb          # 多角形BL法の動作確認
+    ├── 04_polygon_bl.ipynb          # 多角形BL法の動作確認
+    └── 05_polygon_simulated_annealing.ipynb # 多角形焼きなまし法の動作確認
 ```
 
 ---
